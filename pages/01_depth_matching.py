@@ -10,6 +10,15 @@ from services.las_depth_match import (
     read_las_from_upload,
 )
 
+
+DEPTH_CURVE_HINTS = ("DEPT", "DEPTH", "MD", "TVD", "TVDSS", "Z")
+
+
+def _depth_curve_options(curves: list[str]) -> list[str]:
+    depth_like = [curve for curve in curves if any(hint in curve.upper() for hint in DEPTH_CURVE_HINTS)]
+    return sorted(depth_like)
+
+
 st.set_page_config(page_title="LAS Depth Matching", page_icon="📏", layout="wide")
 st.title("LAS Depth Matching")
 st.caption("Upload a reference LAS and a run LAS, then estimate depth shift from gamma correlation.")
@@ -30,29 +39,39 @@ if ref_file and run_file:
 
     ref_curves = list_curve_names(las_ref)
     run_curves = list_curve_names(las_run)
-    common_depth_candidates = [c for c in ["DEPT", "DEPTH", "MD"] if c in ref_curves and c in run_curves]
+    ref_depth_options = _depth_curve_options(ref_curves)
+    run_depth_options = _depth_curve_options(run_curves)
+    common_depth_candidates = [c for c in ["DEPT", "DEPTH", "MD"] if c in ref_depth_options and c in run_depth_options]
 
     st.subheader("Parameters")
     c1, c2, c3 = st.columns(3)
     with c1:
-        depth_options = sorted(set(ref_curves).intersection(run_curves)) or ["DEPT"]
-        default_depth = common_depth_candidates[0] if common_depth_candidates else depth_options[0]
-        depth_curve = st.selectbox(
-            "Depth curve",
-            options=depth_options,
-            index=depth_options.index(default_depth),
-            help="Curve used as depth axis. If missing, LAS index is used.",
-        )
+        has_common_depth = bool(common_depth_candidates)
+        depth_curve = "DEPT"
+        if has_common_depth:
+            depth_curve = st.selectbox(
+                "Depth curve",
+                options=common_depth_candidates,
+                index=0,
+                help="Only depth-like curves shared by both LAS files are shown.",
+            )
+        else:
+            st.warning(
+                "No shared depth mnemonic found (e.g., DEPT/DEPTH/MD). The LAS index will be used as depth axis."
+            )
+
+        gamma_ref_options = [curve for curve in ref_curves if curve not in ref_depth_options] or ref_curves
+        gamma_run_options = [curve for curve in run_curves if curve not in run_depth_options] or run_curves
 
         gamma_curve_ref = st.selectbox(
             "Reference gamma curve",
-            options=ref_curves,
-            index=ref_curves.index("GR") if "GR" in ref_curves else 0,
+            options=gamma_ref_options,
+            index=gamma_ref_options.index("GR") if "GR" in gamma_ref_options else 0,
         )
         gamma_curve_run = st.selectbox(
             "Run gamma curve",
-            options=run_curves,
-            index=run_curves.index("GR") if "GR" in run_curves else 0,
+            options=gamma_run_options,
+            index=gamma_run_options.index("GR") if "GR" in gamma_run_options else 0,
         )
 
     with c2:

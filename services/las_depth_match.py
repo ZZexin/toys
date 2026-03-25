@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import StringIO
+from pathlib import Path
 from typing import Any
 
 import lasio
@@ -18,10 +19,10 @@ class MatchConfig:
     gamma_curve_ref: str = "GR"
     gamma_curve_run: str = "GR"
     resample_step: float = 0.01
-    shift_min: float = -2.5
-    shift_max: float = 2.5
+    shift_min: float = -1.0
+    shift_max: float = 1.0
     shift_step: float = 0.001
-    smooth_sigma: float = 1.0
+    smooth_sigma: float = 2.0
     match_min: float | None = None
     match_max: float | None = None
 
@@ -31,6 +32,12 @@ def read_las_from_upload(uploaded_file: Any) -> lasio.LASFile:
     raw = uploaded_file.getvalue()
     text = raw.decode("latin-1", errors="ignore")
     return lasio.read(StringIO(text))
+
+
+def load_las(source: lasio.LASFile | str | Path) -> lasio.LASFile:
+    if isinstance(source, lasio.LASFile):
+        return source
+    return lasio.read(str(source))
 
 
 def list_curve_names(las: lasio.LASFile) -> list[str]:
@@ -64,9 +71,16 @@ def normalise(x: np.ndarray) -> np.ndarray:
     return (x - np.mean(x)) / std
 
 
-def depth_match_las(las_ref: lasio.LASFile, las_run: lasio.LASFile, config: MatchConfig) -> dict[str, np.ndarray | float]:
-    depth_ref, gamma_ref, null_ref = read_las_curve(las_ref, config.depth_curve, config.gamma_curve_ref)
-    depth_run, gamma_run, null_run = read_las_curve(las_run, config.depth_curve, config.gamma_curve_run)
+def depth_match_las(
+    las_ref: lasio.LASFile | str | Path,
+    las_run: lasio.LASFile | str | Path,
+    config: MatchConfig,
+) -> dict[str, np.ndarray | float]:
+    las_ref_obj = load_las(las_ref)
+    las_run_obj = load_las(las_run)
+
+    depth_ref, gamma_ref, null_ref = read_las_curve(las_ref_obj, config.depth_curve, config.gamma_curve_ref)
+    depth_run, gamma_run, null_run = read_las_curve(las_run_obj, config.depth_curve, config.gamma_curve_run)
 
     depth_ref, gamma_ref = clean_curve(depth_ref, gamma_ref, null_ref)
     depth_run, gamma_run = clean_curve(depth_run, gamma_run, null_run)
@@ -90,6 +104,9 @@ def depth_match_las(las_ref: lasio.LASFile, las_run: lasio.LASFile, config: Matc
         common_depth = common_depth[interval_mask]
         ref = ref[interval_mask]
         run = run[interval_mask]
+
+    if common_depth.size < 20:
+        raise ValueError("Insufficient samples in overlap/matching interval. Increase interval or decrease resampling.")
 
     ref = gaussian_filter1d(ref, sigma=config.smooth_sigma, mode="nearest")
     run = gaussian_filter1d(run, sigma=config.smooth_sigma, mode="nearest")
